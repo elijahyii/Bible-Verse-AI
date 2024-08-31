@@ -1,0 +1,274 @@
+import SwiftUI
+
+struct AIPastorView: View {
+    @State private var userInput: String = ""
+    @State private var chatHistory: [(question: String, response: String)] = []
+    @State private var isLoading: Bool = false
+    @State private var advice: String = "Your advice will appear here."
+
+    var body: some View {
+        NavigationView {
+            VStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        ForEach(chatHistory, id: \.question) { chat in
+                            VStack(alignment: .leading, spacing: 10) {
+                              
+                                Text(chat.question)
+                                    .fontWeight(.medium)
+                                    .padding()
+                                    .background(Color.blue.opacity(0.1))
+                                    .cornerRadius(15)
+                                
+                              
+                                Text(chat.response)
+                                    .padding()
+                                    .background(Color.white)
+                                    .cornerRadius(15)
+                                    .shadow(radius: 3)
+                            }
+                        }
+                    }
+                    .padding()
+                }
+        
+                Spacer() 
+                
+               
+                HStack {
+                    TextField("Write anything here...", text: $userInput, onCommit: getAdvice)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .padding(15)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(25)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 25)
+                                .stroke(Color.gray.opacity(0.4), lineWidth: 1)
+                                
+                        )
+                        .padding(.horizontal)
+                    
+                    Button(action: getAdvice) {
+                        Image(systemName: "paperplane.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 25))
+                            .padding(.trailing)
+                    }
+                }
+                .padding(.bottom, 70) 
+            }
+            .background(Color.white)
+            .navigationBarTitle("Bible Verse AI", displayMode: .inline)
+            .background(TabBarAccessor { tabBar in
+                tabBar.isHidden = true
+            })
+        }
+    }
+
+    private func getAdvice() {
+        guard !userInput.isEmpty else { return }
+        isLoading = true
+
+        let question = userInput
+        userInput = "" 
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let adviceText = BibleAdviceService.shared.getAdvice(for: question)
+            DispatchQueue.main.async {
+                
+                let newEntry = (question: question, response: adviceText)
+                chatHistory.append(newEntry)
+                advice = adviceText 
+                isLoading = false
+            }
+        }
+    }
+
+    private func reloadAdvice(for question: String) {
+        isLoading = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let newAdviceText = BibleAdviceService.shared.getAdvice(for: question)
+            DispatchQueue.main.async {
+                if let index = chatHistory.firstIndex(where: { $0.question == question }) {
+                    chatHistory[index].response = newAdviceText
+                }
+                advice = newAdviceText 
+                isLoading = false
+            }
+        }
+    }
+}
+
+
+struct TabBarAccessor: UIViewControllerRepresentable {
+    var callback: (UITabBar) -> Void
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        UIViewController()
+    }
+
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
+        if let tabBar = uiViewController.tabBarController?.tabBar {
+            self.callback(tabBar)
+        }
+    }
+}
+
+struct AIPastorView_Previews: PreviewProvider {
+    static var previews: some View {
+        AIPastorView()
+    }
+}
+
+
+
+import Foundation
+import NaturalLanguage
+
+class BibleAdviceService {
+    static let shared = BibleAdviceService()
+    private init() {}
+
+    func getAdvice(for userInput: String) -> String {
+        let sentiment = analyzeSentiment(for: userInput)
+        let emotion = analyzeEmotion(for: userInput)
+        let keywords = extractKeywords(from: userInput)
+        let relevantVerses = findRelevantVerses(for: keywords, sentiment: sentiment, emotion: emotion)
+        let bestMatch = relevantVerses.first ?? "No relevant verse found."
+        let explanation = generateDynamicExplanation(for: userInput, verse: bestMatch, sentiment: sentiment, emotion: emotion)
+        return "\(bestMatch)\n\nExplanation: \(explanation)"
+    }
+
+    private func analyzeSentiment(for text: String) -> String {
+        let sentimentPredictor = NLTagger(tagSchemes: [.sentimentScore])
+        sentimentPredictor.string = text
+        let (sentiment, _) = sentimentPredictor.tag(at: text.startIndex, unit: .paragraph, scheme: .sentimentScore)
+        if let sentimentScore = sentiment?.rawValue, let score = Double(sentimentScore) {
+            if score > 0.1 {
+                return "positive"
+            } else if score < -0.1 {
+                return "negative"
+            } else {
+                return "neutral"
+            }
+        }
+        return "neutral"
+    }
+    
+    private func analyzeEmotion(for text: String) -> String {
+        
+        if text.contains("worried") || text.contains("anxious") {
+            return "anxiety"
+        } else if text.contains("happy") || text.contains("joyful") {
+            return "happiness"
+        } else if text.contains("sad") || text.contains("depressed") {
+            return "sadness"
+        } else {
+            return "neutral"
+        }
+    }
+
+    private func extractKeywords(from text: String) -> [String] {
+        let tagger = NLTagger(tagSchemes: [.lemma])
+        tagger.string = text.lowercased()
+        var keywords: [String] = []
+
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .lemma, options: [.omitPunctuation, .omitWhitespace, .omitOther]) { tag, tokenRange in
+            if let tag = tag {
+                keywords.append(tag.rawValue)
+            }
+            return true
+        }
+
+        return keywords
+    }
+
+    private func findRelevantVerses(for keywords: [String], sentiment: String, emotion: String) -> [String] {
+        var matches: [BibleVerse] = []
+        var scores: [Int] = []
+
+        for verse in bibleVerses {
+            let verseKeywords = extractKeywords(from: verse.text)
+            var matchScore = keywords.filter { verseKeywords.contains($0) }.count
+
+          
+            if sentiment == "positive" && verse.text.contains("joy") {
+                matchScore += 1
+            } else if sentiment == "negative" && verse.text.contains("comfort") {
+                matchScore += 1
+            }
+
+            if emotion == "anxiety" && verse.text.contains("peace") {
+                matchScore += 1
+            } else if emotion == "sadness" && verse.text.contains("hope") {
+                matchScore += 1
+            }
+
+            if matchScore > 0 {
+                matches.append(verse)
+                scores.append(matchScore)
+            }
+        }
+
+        
+        let sortedMatches = matches.enumerated().sorted { scores[$0.offset] > scores[$1.offset] }
+        return sortedMatches.map { "Book: \($0.element.book)\nChapter: \($0.element.chapter)\nVerse \($0.element.verse): \($0.element.text)" }
+    }
+
+    private func generateDynamicExplanation(for userInput: String, verse: String, sentiment: String, emotion: String) -> String {
+     
+        let verseKeywords = extractKeywords(from: verse)
+        let inputKeywords = extractKeywords(from: userInput)
+
+        
+        var explanation = "This verse relates to your situation because "
+
+       
+        switch sentiment {
+        case "positive":
+            explanation += "you are feeling positive, and this verse talks about "
+            if verseKeywords.contains("joy") || verseKeywords.contains("happiness") {
+                explanation += "joy and happiness."
+            } else {
+                explanation += "maintaining a positive outlook."
+            }
+        case "negative":
+            explanation += "you are feeling down, and this verse offers "
+            if verseKeywords.contains("comfort") || verseKeywords.contains("peace") {
+                explanation += "comfort and peace."
+            } else {
+                explanation += "encouragement to uplift your spirit."
+            }
+        case "neutral":
+            explanation += "it provides wisdom that can be helpful in any situation."
+        default:
+            explanation += "it offers timeless wisdom."
+        }
+
+       
+        for keyword in inputKeywords {
+            if keyword == "tired" {
+                explanation += " You mentioned feeling tired. This verse reminds you to find rest in God and trust in His strength."
+            } else if keyword == "stress" {
+                explanation += " You mentioned feeling stressed. This verse encourages you to find peace and comfort in God's presence."
+            } else if keyword == "work" {
+                explanation += " You mentioned work. This verse emphasizes finding balance and strength in God even during challenging times."
+            }
+        }
+
+        explanation += " Consider reflecting on these words and finding strength in them."
+
+        return explanation
+    }
+}
+
+struct BibleVerse {
+    let book: String
+    let chapter: Int
+    let verse: Int
+    let text: String
+}
+
+let bibleVerses: [BibleVerse] = [
+    BibleVerse(book: "Genesis", chapter: 1, verse: 1, text: "In the beginning God created the heaven and the earth."),    //add 500+
